@@ -19,7 +19,7 @@ if (!defined('SMF'))
 	die('Hacking Attempt...');
 
 /**
- * - Searches a post for all links and trys to replace them with the destinations page title
+ * Searches a post for all links and trys to replace them with the destinations page title
  * - Uses database querys for internal links and web request for external links
  * - Will not change links if they resolve to names in the admin disabled list
  * - truncates long titles per admin panel settings
@@ -125,8 +125,17 @@ function Add_title_to_link(&$message, $id_msg = -1)
 					}
 				}
 				else
-				// external links are good too, but protect against those double encoded pasted links
-					$request = fetch_web_data(un_htmlspecialchars(un_htmlspecialchars($url_modified)));
+				{
+					// make sure this has the DNA of an html link and not a file
+					$check = isset($urlinfo['path']) ? pathinfo($urlinfo['path']) : array();
+
+					// looks like an extesion, 4 or less characters, then it needs to be htmlish
+					if (isset($check['extension']) && !isset($check['extension'][4]) && (!in_array($check['extension'], array('htm', 'html', '', '//', 'php'))))
+						$request = false;
+					else
+						// external links are good too, but protect against those double encoded pasted links
+						$request = fetch_web_data(un_htmlspecialchars(un_htmlspecialchars($url_modified)));
+				}
 
 				// request went through and there is a page title in the result
 				if ($request !== false && preg_match('~<title>(.+?)</title>~ism', $request, $matches))
@@ -144,16 +153,16 @@ function Add_title_to_link(&$message, $id_msg = -1)
 					// Some titles are just tooooooooo long
 					$title = wordwrap($title, $modSettings['descriptivelinks_title_url_length'], '<br />', true);
 					$junk = explode('<br />', $title, 2);
-					$title = $junk[0];
+					$title = trim($junk[0]);
 
-					// Make sure we did not get a turd title, makes the link even worse, no one likes turds
-					if (array_search(strtolower($title), $links_title_generic_names) === false)
+					// Make sure we did not get a turd title, makes the link even worse, plus no one likes turds
+					if (!empty($title) && array_search(strtolower($title), $links_title_generic_names) === false) 
 					{
 						// protect special characters and our database
 						$title = $smcFunc['htmlspecialchars'](stripslashes($title), ENT_QUOTES);
 
 						// Update the link with the title we found
-						$message = str_replace('[%url]' . $url . '[/url%]', '[url=' . $url_return . ']' . $title . '[/url]', $message);
+						$message = preg_replace('`\[%url\]' . preg_quote($url) . '\[/url%\]`', '[url=' . $url_return . ']' . $title . '[/url]', $message);
 					}
 					else
 					{
@@ -161,7 +170,7 @@ function Add_title_to_link(&$message, $id_msg = -1)
 						if (isset($modSettings['aeva_enable']))
 							$message = preg_replace('`\[%url\]' . preg_quote($url) . '\[/url%\]`', '[url=' . $url_return . ']' . $url . '[/url]', $message);
 						else
-							$message = str_replace('[%url]' . $url . '[/url%]', $url, $message);
+							$message = preg_replace('`\[%url\]' . preg_quote($url) . '\[/url%\]`', $url, $message);
 					}
 				}
 				else
@@ -170,8 +179,11 @@ function Add_title_to_link(&$message, $id_msg = -1)
 					if (isset($modSettings['aeva_enable']))
 						$message = preg_replace('`\[%url\]' . preg_quote($url) . '\[/url%\]`', '[url=' . $url_return . ']' . $url . '[/url]', $message);
 					else
-						$message = str_replace('[%url]' . $url . '[/url%]', $url, $message);
+						$message = preg_replace('`\[%url\]' . preg_quote($url) . '\[/url%\]`', $url, $message);
 				}
+
+				// pop the connection to keep it alive
+				$server_version = $smcFunc['db_server_info']();
 			}
 
 			// Put the server socket timeout back to what is was originally
@@ -182,8 +194,7 @@ function Add_title_to_link(&$message, $id_msg = -1)
 }
 
 /**
- *
- * - Called by Add_title_to_link to resolve the name of internal links
+ * Called by Add_title_to_link to resolve the name of internal links
  * - returns the topic or post subject if its a message link
  * - returns the board name if its a board link
  *
